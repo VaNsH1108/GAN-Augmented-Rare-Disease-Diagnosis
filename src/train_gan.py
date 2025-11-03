@@ -10,8 +10,9 @@ import os
 # -----------------------------
 # Configurations
 # -----------------------------
-dataroot = "./data/chest_xray"
-workers = 2
+dataroot = r"E:\New folder\Health-Based-APP\data\chest_xray"
+
+workers = 0
 batch_size = 64
 image_size = 64
 nc = 1
