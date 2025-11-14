@@ -1,195 +1,182 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision.datasets as dset
-import torchvision.transforms as transforms
-import torchvision.utils as vutils
-import matplotlib.pyplot as plt
 import os
+import random
+import torch
+from torch import nn, optim
+from torch.utils.data import DataLoader, random_split
+from torchvision import datasets, transforms, utils
 
-# -----------------------------
-# Configurations
-# -----------------------------
-dataroot = r"E:\New folder\Health-Based-APP\data\chest_xray"
+# --------------------
+# CONFIG
+# --------------------
+DATA_DIR = r"E:\New folder\Health-Based-APP\data\chest_xray\train"
+BATCH_SIZE = 64
+IMAGE_SIZE = 64
+LATENT_DIM = 100
+EPOCHS = 300  # change if needed
 
-workers = 0
-batch_size = 64
-image_size = 64
-nc = 1
-nz = 100
-ngf = 64
-ndf = 64
-num_epochs = 50
-lr_G = 0.0001
-lr_D = 0.0001
-beta1 = 0.5
+# --------------------
+# DEVICE CHECK
+# --------------------
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"\n✅ Training on: **{device.type.upper()}**")
 
-output_dir = "outputs"
-checkpoint_dir = "checkpoints"
-os.makedirs(output_dir, exist_ok=True)
-os.makedirs(checkpoint_dir, exist_ok=True)
+# --------------------
+# DATA TRANSFORMS
+# --------------------
+transform = transforms.Compose([
+    transforms.Grayscale(num_output_channels=1),
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5], [0.5])
+])
 
-# -----------------------------
-# Dataset & Loader
-# -----------------------------
-dataset = dset.ImageFolder(
-    root=dataroot,
-    transform=transforms.Compose([
-        transforms.Grayscale(num_output_channels=1),
-        transforms.Resize(image_size),
-        transforms.CenterCrop(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-)
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size,
-                                         shuffle=True, num_workers=workers)
+dataset = datasets.ImageFolder(DATA_DIR, transform=transform)
+total_images = len(dataset)
+half_size = total_images // 2
+dataset, _ = random_split(dataset, [half_size, total_images - half_size])
 
-# -----------------------------
-# Define Generator
-# -----------------------------
+print(f"✅ Using {half_size} images (50% of dataset).")
+
+loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+# --------------------
+# DCGAN MODELS
+# --------------------
 class Generator(nn.Module):
     def __init__(self):
-        super(Generator, self).__init__()
-        self.main = nn.Sequential(
-            nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
-            nn.BatchNorm2d(ngf * 8),
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.ConvTranspose2d(LATENT_DIM, 512, 4, 1, 0),
+            nn.BatchNorm2d(512),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf * 4),
+            nn.ConvTranspose2d(512, 256, 4, 2, 1),
+            nn.BatchNorm2d(256),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf * 2),
+            nn.ConvTranspose2d(256, 128, 4, 2, 1),
+            nn.BatchNorm2d(128),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ngf),
+            nn.ConvTranspose2d(128, 64, 4, 2, 1),
+            nn.BatchNorm2d(64),
             nn.ReLU(True),
 
-            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(64, 1, 4, 2, 1),
             nn.Tanh()
         )
 
-    def forward(self, input):
-        return self.main(input)
+    def forward(self, z):
+        return self.net(z)
 
-
-# -----------------------------
-# Define Discriminator
-# -----------------------------
 class Discriminator(nn.Module):
     def __init__(self):
-        super(Discriminator, self).__init__()
-        self.main = nn.Sequential(
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(1, 64, 4, 2, 1),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 2),
+            nn.Conv2d(64, 128, 4, 2, 1),
+            nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 4),
+            nn.Conv2d(128, 256, 4, 2, 1),
+            nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 8),
+            nn.Conv2d(256, 512, 4, 2, 1),
+            nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
+            nn.Conv2d(512, 1, 4, 1, 0),
             nn.Sigmoid()
         )
 
-    def forward(self, input):
-        return self.main(input)
+    def forward(self, x):
+        return self.net(x).view(-1, 1)
 
 
-# -----------------------------
-# Initialize models & setup
-# -----------------------------
-netG = Generator().to(device)
-netD = Discriminator().to(device)
+generator = Generator().to(device)
+discriminator = Discriminator().to(device)
+
 criterion = nn.BCELoss()
-optimizerD = optim.Adam(netD.parameters(), lr=lr_D, betas=(beta1, 0.999))
-optimizerG = optim.Adam(netG.parameters(), lr=lr_G, betas=(beta1, 0.999))
+opt_g = optim.Adam(generator.parameters(), lr=0.0002)
+opt_d = optim.Adam(discriminator.parameters(), lr=0.0002)
 
-# -----------------------------
-# Track losses for plotting
-# -----------------------------
-losses_D = []
-losses_G = []
+# --------------------
+# TRAINING LOOP
+# --------------------
+# --------------------
+# CHECKPOINT RESUME
+# --------------------
+os.makedirs("checkpoints", exist_ok=True)
+checkpoint_path = "checkpoints/gan_checkpoint.pth"
 
-# -----------------------------
-# Training Loop
-# -----------------------------
-print(f"Starting Training for {num_epochs} epochs...")
+start_epoch = 1
 
-for epoch in range(1, num_epochs + 1):
-    lossD_epoch = 0.0
-    lossG_epoch = 0.0
+if os.path.exists(checkpoint_path):
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    generator.load_state_dict(checkpoint["generator"])
+    discriminator.load_state_dict(checkpoint["discriminator"])
+    opt_g.load_state_dict(checkpoint["opt_g"])
+    opt_d.load_state_dict(checkpoint["opt_d"])
+    start_epoch = checkpoint["epoch"] + 1
+    print(f"🔄 Resuming training from epoch {start_epoch}...\n")
+else:
+    print("✨ Starting fresh training...\n")
 
-    for i, (data, _) in enumerate(dataloader, 0):
-        ############################
-        # (1) Update Discriminator
-        ############################
-        netD.zero_grad()
-        real = data.to(device)
-        b_size = real.size(0)
-        label_real = torch.full((b_size,), 0.8, device=device)
-        output_real = netD(real).view(-1)
-        lossD_real = criterion(output_real, label_real)
-        lossD_real.backward()
+# --------------------
+# TRAINING LOOP
+# --------------------
+for epoch in range(start_epoch, EPOCHS + 1):
+    for real, _ in loader:
+        real = real.to(device)
+        batch_size = real.size(0)
 
-        noise = torch.randn(b_size, nz, 1, 1, device=device)
-        fake = torch.clamp(netG(noise).detach(), -1, 1)
-        label_fake = torch.full((b_size,), 0.0, device=device)
-        output_fake = netD(fake).view(-1)
-        lossD_fake = criterion(output_fake, label_fake)
-        lossD_fake.backward()
-        optimizerD.step()
+        # Smoother labels (fix LossG spike)
+        real_labels = 0.9 * torch.ones(batch_size, 1).to(device)
+        fake_labels = torch.zeros(batch_size, 1).to(device)
 
-        ############################
-        # (2) Update Generator
-        ############################
-        netG.zero_grad()
-        label_gen = torch.full((b_size,), 0.8, device=device)
-        output = netD(fake).view(-1)
-        lossG = criterion(output, label_gen)
-        lossG.backward()
-        optimizerG.step()
+        # Train Discriminator
+        z = torch.randn(batch_size, LATENT_DIM, 1, 1).to(device)
+        fake = generator(z)
 
-        lossD_epoch += (lossD_real + lossD_fake).item()
-        lossG_epoch += lossG.item()
+        pred_real = discriminator(real)
+        pred_fake = discriminator(fake.detach())
 
-    # Average losses
-    avg_lossD = lossD_epoch / len(dataloader)
-    avg_lossG = lossG_epoch / len(dataloader)
-    losses_D.append(avg_lossD)
-    losses_G.append(avg_lossG)
+        loss_d_real = criterion(pred_real, real_labels)
+        loss_d_fake = criterion(pred_fake, fake_labels)
+        loss_d = loss_d_real + loss_d_fake
 
-    print(f"Epoch [{epoch}/{num_epochs}]  LossD: {avg_lossD:.4f}  LossG: {avg_lossG:.4f}")
+        opt_d.zero_grad()
+        loss_d.backward()
+        opt_d.step()
 
-    # Save generated samples every 10 epochs
+        # Train Generator
+        z = torch.randn(batch_size, LATENT_DIM, 1, 1).to(device)
+        fake = generator(z)
+        pred_fake = discriminator(fake)
+        loss_g = criterion(pred_fake, real_labels)
+
+        opt_g.zero_grad()
+        loss_g.backward()
+        opt_g.step()
+
+    print(f"🔥 Epoch [{epoch}/{EPOCHS}] | LossD: {loss_d.item():.4f} | LossG: {loss_g.item():.4f}")
+
+    # Save sample every 10 epochs
     if epoch % 10 == 0:
-        fake = netG(torch.randn(64, nz, 1, 1, device=device))
-        vutils.save_image(fake.detach(), f"{output_dir}/fake_samples_epoch_{epoch}.png", normalize=True)
+        os.makedirs("samples", exist_ok=True)
+        utils.save_image(fake[:25], f"samples/epoch_{epoch}.png", nrow=5, normalize=True)
+        print(f"📸 Saved → samples/epoch_{epoch}.png")
 
-    # -----------------------------
-    # Plot and save loss graph
-    # -----------------------------
-    plt.figure(figsize=(8, 6))
-    plt.plot(losses_D, label="Discriminator Loss", color="red")
-    plt.plot(losses_G, label="Generator Loss", color="blue")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("GAN Training Losses")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "loss_plot.png"))
-    plt.close()
+    # ✅ SAVE CHECKPOINT EVERY EPOCH
+    torch.save({
+        "epoch": epoch,
+        "generator": generator.state_dict(),
+        "discriminator": discriminator.state_dict(),
+        "opt_g": opt_g.state_dict(),
+        "opt_d": opt_d.state_dict(),
+    }, checkpoint_path)
 
-print("✅ Training complete. Loss plot saved to outputs/loss_plot.png")
+print("\n✅ Training complete!")
