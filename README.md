@@ -39,3 +39,21 @@ After every epoch, a complete checkpoint file is saved, containing the current e
 Dataset
 
 Training expects chest X-ray images arranged inside the data/chest_xray/train folder. All images are automatically converted to grayscale, resized, and normalized. To reduce training time during experimentation, the script uses only half of the available dataset, chosen randomly.
+
+Key Features
+
+DCGAN architecture adapted for medical image generation
+
+Automatic checkpoint saving and resume support
+
+Loss tracking in CSV format
+
+Periodic sample image generation
+
+Clean modular code in separate training and model files
+
+Compatible with both CPU and GPU
+
+Future Improvements
+
+Possible enhancements include adding TensorBoard support, plotting loss curves, using higher-resolution images, exploring conditional GAN architectures, or integrating a better monitoring pipeline.
